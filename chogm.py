@@ -27,8 +27,11 @@
 chogm [OPTIONS] files_spec directories_spec file [file file ...]
    -R, --recursive      recurse through the directory tree of each file
    -v, --verbose        show progress
+   -h, --help           display this usage message
    files_spec           owner:group:perms to set on files
    directories_spec     owner:group:perms to set on directories
+   file                 one or more files to operate on.  Use '-' to
+                        process stdin as a list of files
 
 files_spec tells what owner, group, and permissions should be given to any
 files. Each of the three elements are separated by a ':'. If a value is
@@ -38,9 +41,6 @@ the encountered files.
 directories_spec works just like files_spec, but it is applied to
 directories. In addition, if you give a '-' as the owner or group, the
 same owner and group will be taken from the files_spec.
-
-If files_spec is '::' then no operations are done on files. Similarly, if
-directories_spec is '::' then no operations are done on directories.
 
 EXAMPLES
 
@@ -56,12 +56,27 @@ EXAMPLES
       $ find /pub/www -maxdepth 1 -type d | tail -n +2 | xargs chmod 755 
 
 
-  chogm -R :: ::u+x ~/tmp
+  chogm -R :accounting:g+rw,o= :-:g=rwx,o= /mnt/acct
 
-    Add the execute bit for the owner of ~/tmp and any directories under
-    it. This is the same as doing:
+    Change the group of all files in /mnt/acct to be accounting, and
+    make sure people in that group can read, write, and create files
+    anywhere in that directory tree. Also make sure that the hoi palloi
+    can't peek at accounting's files. This is the same as doing:
 
-		$ find ~/tmp -type d | xargs chmod u+x
+		$ chgrp -R accounting /mnt/acct
+		$ find /mnt/acct -type f -print | xargs chmod g+rw,o=
+		$ find /mnt/acct -type d -print | xargs chmod g=rwx,o= 
+
+
+  find ~/src -depth 2 -type d -print | grep -v '/.git$' | chogm -R :staff:660 :-:770 -
+
+    Assuming your ~/src directory contains a bunch of directories, each
+    with their own git project, change all those files to have a group
+    of staff and permissions of -rw-rw---- and all the directories to
+    also have a group of staff but permissions of -rwxrwx---. While
+    doing all of that, don't change the permissions of any of the files
+    inside of .git directories.
+
 
 REQUIREMENTS
 
@@ -70,17 +85,13 @@ chmod to do it's work. It also uses the python multiprocessing module from
 the standard library which was added in python 2.6, so it won't work with
 python versions earlier than that. It won't work in python 3.x.
 
-EXIT CODE
+EXIT STATUS
 
-Exit code is 0 if all operations were successful. Exit code is 1 if some
-operations were not successfull (ie permission denied on a directory).
-Exit code is 2 if usage was incorrect.
+ 0  everything OK
+ 1  some operations not successful (ie permission denied on a directory)
+ 2  incorrect usage
 
 """
-
-# TODO
-#   add --exclude command line option to exclude certain patterns of files
-#   read files from stdin so you can pipe the output of find into this
 
 import sys
 import os
@@ -94,20 +105,22 @@ class Usage(Exception):
 		self.msg = msg
 
 class Ogm:
-	"""hold an owner, group, and mode"""
+	"""store an owner, group, and mode"""
 	def __init__(self):
 		self.owner = None
 		self.group = None
 		self.mode = None
 
 class Worker:
-	"""a worker class that uses python multiprocessing module clone itself, launch an OS
-	   processes, and then catch new work from a multiprocessing.Pipe and send it to the
-	   OS process to get done.
+	"""Launch an operating system process and feed it data
 	
-	   The OS process is xargs, so that we don't have to execute a new OS process for
-	   every file we want to modify.  We just send it to standard in, and let xargs take
-	   care of how often it actually need to execute the chmod, chgrp or chmod
+	a worker class that uses python multiprocessing module clone itself, launch an OS
+	processes, and then catch new work from a multiprocessing.Pipe and send it to the
+	OS process to get done.
+	
+	The OS process is xargs, so that we don't have to execute a new OS process for
+	every file we want to modify.  We just send it to standard in, and let xargs take
+	care of how often it actually need to execute the chmod, chgrp or chmod
 	
 	"""
 	def __init__(self, cmd, arg):
@@ -123,9 +136,9 @@ class Worker:
 		###self.pipe_parent.close()  # this is the parent so we close the reading end of the pipe
 
 	def name(self):
-		"""return the name of this worker: the command it runs and the first argument for that command
+		"""return the name of this worker
 		
-		   Examples: 'chown www-data' or 'chmod 755'
+		the command it runs and the first argument for that command, ie 'chown www-data'
 		
 		"""
 		return "%s %s" % (self.cmd, self.arg)
@@ -136,7 +149,9 @@ class Worker:
 		self.pipe_child.send(file)
 		
 	def runner(self, cmd, arg):
-		"""This function is run in a child process.  So we read from the parent
+		"""Start a subprocess and feed it data from a pipe
+		
+		This function is run in a child process.  So we read from the parent
 		pipe to get work to do, and write to the parent pipe to send error messages
 		
 		We also fire up an xargs subprocess to actually do the work, and feed stuff
@@ -148,16 +163,16 @@ class Worker:
 		while True:
 			try:
 				# receive work from our parent pipe
-				file = self.pipe_parent.recv()
+				filename = self.pipe_parent.recv()
 				# if we get message that there is None work, then we are done
-				if file is None:
+				if filename == None:
 					if debug:
 						print >>sys.stderr, "--worker '%s' has no more work to do" % self.name()
 					break
 				# send the file to the stdin of the xargs process
-				print >>xargs.stdin, file
+				print >>xargs.stdin, filename
 				if debug:
-					print >>sys.stderr, "--worker '%s' received %s" % (self.name(), file)
+					print >>sys.stderr, "--worker '%s' received %s" % (self.name(), filename)
 			except EOFError:
 				break
 
@@ -178,10 +193,13 @@ class Worker:
 		return (rtncode,errmsgs)
 
 class Manager:
-	def __init__(self, fogm, dogm):
+	"""Start and manage all of the subprocesses"""
+	def __init__(self, fogm, dogm, verbose=False):
 		self.haveError = False
 		self.fogm = fogm
 		self.dogm = dogm
+		self.verbose = verbose
+		
 		self.fchown = None
 		self.dchown = None
 		self.fchgrp = None
@@ -221,7 +239,8 @@ class Manager:
 			self.dchmod.add(file)
 
 	def report_information(self,message):
-		if verbose:
+		"""report information to stderr if verbose is set"""
+		if self.verbose:
 			print >>sys.stderr, message
 
 	def report_error(self, message):
@@ -263,7 +282,6 @@ def main(argv=None):
 	# yes the global variables are a bit messy, but it's cleaner than passing them into
 	# all of our classes
 	global debug
-	global verbose
 	global ranAs
 	debug = False
 	verbose = False
@@ -313,12 +331,23 @@ def main(argv=None):
 		if dirOgm.mode == '-':
 			dirOgm.mode = fileOgm.mode
 
+		if args == []:
+			raise Usage('No files given')
+
+
 		# start up the child processes
-		m = Manager(fileOgm, dirOgm)
+		m = Manager(fileOgm, dirOgm, verbose)
 		
 		# examine each of the files
-		for filename in args:
-			examine(m, filename, recursive)
+		if args == ['-']:
+			# get files from standard in
+			while True:
+				onefile = sys.stdin.readline()
+				if onefile == "": break
+				examine(m, onefile.rstrip("\r\n"), recursive)
+		else:
+			for filename in args:
+				examine(m, filename, recursive)
 
 		# and finish up
 		return m.finish()
@@ -329,6 +358,7 @@ def main(argv=None):
 		return 2
 
 def examine(m, thisfile, recursive=False):
+	"""Recursively process a single file or directory"""
 	try:
 		if os.path.isfile(thisfile):
 			m.do_file(thisfile)
