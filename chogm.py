@@ -80,7 +80,6 @@ Exit code is 2 if usage was incorrect.
 
 # TODO
 #   add --exclude command line option to exclude certain patterns of files
-#   fix exit code - need to catch and propogate it up from the workers
 #   read files from stdin so you can pipe the output of find into this
 
 import sys
@@ -115,13 +114,13 @@ class Worker:
 		self.cmd = cmd
 		self.arg = arg
 		# set up a pipe so we can communicate with our multiprocessing.Process.
-		# The parent side of the pipe is the writer, we write filenames into it.
-		# The child side of the pipe is the reader.  The child reads files out of
-		# the pipe and puts them on stdin of the unix xargs subproces
-		self.pipe_reader, self.pipe_writer = mp.Pipe(duplex = False)
+		# From the parent process, we write filenames into the child pipe and read error
+		# messages from it.  From the child process, we read filenames from the parent pipe
+		# and write error messages into it.
+		self.pipe_parent, self.pipe_child = mp.Pipe(duplex = True)
 		self.p = mp.Process(target=self.runner,args=(cmd,arg,))
 		self.p.start()
-		###self.pipe_reader.close()  # this is the parent so we close the reading end of the pipe
+		###self.pipe_parent.close()  # this is the parent so we close the reading end of the pipe
 
 	def name(self):
 		"""return the name of this worker: the command it runs and the first argument for that command
@@ -132,23 +131,28 @@ class Worker:
 		return "%s %s" % (self.cmd, self.arg)
 
 	def add(self, file):
-		"""send a filename to the writing end of the pipe"""
-		# this is called by the parent, and writes stuff into the pipe for the child to read out
-		self.pipe_writer.send(file)
+		"""send a filename to the child process via a pipe"""
+		# this is called by the parent, and writes a filename to the child pipe
+		self.pipe_child.send(file)
 		
 	def runner(self, cmd, arg):
-		###self.pipe_writer.close()  # this is the child so we close the writing end of the pipe
-		xargs = subprocess.Popen(["xargs","echo", cmd, arg], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		"""This function is run in a child process.  So we read from the parent
+		pipe to get work to do, and write to the parent pipe to send error messages
+		
+		We also fire up an xargs subprocess to actually do the work, and feed stuff
+		from our parent pipe to stdin of the subprocess.
+		"""
+		xargs = subprocess.Popen(["xargs",cmd, arg], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 		if debug:
 			print >>sys.stderr, "--worker '%s' started xargs subprocess pid=%i" % (self.name(), xargs.pid)
 		while True:
 			try:
-				# receive work from our pipe
-				file = self.pipe_reader.recv()
+				# receive work from our parent pipe
+				file = self.pipe_parent.recv()
 				# if we get message that there is None work, then we are done
 				if file is None:
 					if debug:
-						print >>sys.stderr, "--worker '%s' received poisen pill" % self.name()
+						print >>sys.stderr, "--worker '%s' has no more work to do" % self.name()
 					break
 				# send the file to the stdin of the xargs process
 				print >>xargs.stdin, file
@@ -158,22 +162,24 @@ class Worker:
 				break
 
 		# we have broken out of the loop, so that means we have no more work to do
-		# gracefully close down the xargs process and catch the output
+		# gracefully close down the xargs process, save the contents of stderr, and
+		# write the exit code and the errors into the pipe to our parent
 		(stdoutdata,stderrdata) = xargs.communicate()
 		if debug:
 			print >>sys.stderr, "--worker '%s' xargs pid=%i returncode=%i" % (self.name(), xargs.pid, xargs.returncode)
-			print >>sys.stderr, "--worker '%s' xargs output=%s" % (self.name(), stdoutdata)
-		#if self.verbose:
-		#	print >>sys.stderr, stdoutdata
-		#	print >>sys.stderr, stderrdata
+			print >>sys.stderr, "--worker '%s' xargs stderr=%s" % (self.name(), stderrdata)
+		self.pipe_parent.send( (xargs.returncode, stderrdata.rstrip('\r\n')) )
 
 	def gohome(self):
 		if debug:
 			print >>sys.stderr, "--worker '%s' joining mp.Process" % self.name()
+		(rtncode,errmsgs) = self.pipe_child.recv()
 		self.p.join()
+		return (rtncode,errmsgs)
 
 class Manager:
 	def __init__(self, fogm, dogm):
+		self.haveError = False
 		self.fogm = fogm
 		self.dogm = dogm
 		self.fchown = None
@@ -182,6 +188,7 @@ class Manager:
 		self.dchgrp = None
 		self.fchmod = None
 		self.dchmod = None
+		
 		if fogm.owner:
 			self.fchown = Worker('chown', fogm.owner)
 		if dogm.owner:
@@ -213,14 +220,27 @@ class Manager:
 		if self.dchmod:
 			self.dchmod.add(file)
 
+	def report_information(self,message):
+		if verbose:
+			print >>sys.stderr, message
+
+	def report_error(self, message):
+		"""report an error by printing it to stderr"""
+		self.haveError = True
+		print >>sys.stderr, message
+
 	def finish(self):
-		"""fire all of our workers"""
+		"""fire all of our workers and return a proper shell return code"""
 		self.fire(self.fchown)
 		self.fire(self.dchown)
 		self.fire(self.fchgrp)
 		self.fire(self.dchgrp)
 		self.fire(self.fchmod)
 		self.fire(self.dchmod)
+		if self.haveError:
+			return 1
+		else:
+			return 0
 
 	def fire(self, worker):
 		"""tell a worker there is no more work for them and send them home"""
@@ -228,8 +248,9 @@ class Manager:
 			# put the "no more work" paper in the inbox
 			worker.add(None)
 			# and send the worker home
-			worker.gohome()
-
+			(rtncode,stderrdata) = worker.gohome()
+			if rtncode != 0:
+				self.report_error(stderrdata)			
 
 def main(argv=None):
 	if argv is None:
@@ -270,16 +291,16 @@ def main(argv=None):
 	
 		# process arguments
 		spec = args.pop(0).split(':')
-		if len(spec) <> 3:
-			raise Usage('%s: Invalid file specification' % ranAs)
+		if len(spec) != 3:
+			raise Usage('Invalid file specification')
 		fileOgm = Ogm()
 		fileOgm.owner = spec[0]
 		fileOgm.group = spec[1]
 		fileOgm.mode = spec[2]
 
 		spec = args.pop(0).split(':')
-		if len(spec) <> 3:
-			raise Usage('%s: Invalid directory specification' % ranAs) 
+		if len(spec) != 3:
+			raise Usage('Invalid directory specification') 
 		dirOgm = Ogm()
 		dirOgm.owner = spec[0]
 		dirOgm.group = spec[1]
@@ -295,40 +316,39 @@ def main(argv=None):
 		# start up the child processes
 		m = Manager(fileOgm, dirOgm)
 		
-		# walk through our files, making the changes
-		for file in args:
-			walktree(m, file, recursive)
+		# examine each of the files
+		for filename in args:
+			examine(m, filename, recursive)
 
 		# and finish up
-		m.finish()
-		return 0
+		return m.finish()
 
 	except Usage, err:
-		print >>sys.stderr, err.msg
+		print >>sys.stderr, "%s: %s" % (ranAs, err.msg)
 		print >>sys.stderr, "for more information use --help"
 		return 2
 
-def walktree(m, top, recursive=False):
+def examine(m, thisfile, recursive=False):
 	try:
-		if os.path.isfile(top):
-			m.do_file(top)
-		elif os.path.isdir(top):
-			if verbose:
-				print >>sys.stderr, "Processing directory %s" % top
-			m.do_dir(top)
+		if os.path.isfile(thisfile):
+			m.do_file(thisfile)
+		elif os.path.isdir(thisfile):
+			m.do_dir(thisfile)
 			if recursive:
+				m.report_information("Processing directory %s...." % thisfile)
 				try:
-					for f in os.listdir(top):
-						walktree(m, os.path.join(top,f), recursive)
+					for eachfile in os.listdir(thisfile):
+						examine(m, os.path.join(thisfile, eachfile), recursive)
 				except OSError, e:
+					# do nicer formatting for common errors
 					if e.errno == 13:
-						print >>sys.stderr,"%s: %s: Permission denied." % (ranAs, e.filename)
+						m.report_error("%s: %s: Permission denied" % (ranAs, e.filename))
 					else:
-						print >>sys.stderr, e
+						m.report_error("%s: %s" % (ranAs, e))
 		else:
-			print >>sys.stderr, "%s: cannot access '%s': No such file or directory" % (ranAs, top)
+			m.report_error("%s: cannot access '%s': No such file or directory" % (ranAs, thisfile))
 	except OSError, ose:
-		print >>sys.stderr, ose
+		m.report_error("%s: %s" % (ranAs, e))		
 
 
 if __name__ == "__main__":
