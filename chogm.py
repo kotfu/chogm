@@ -42,7 +42,7 @@ owner and group will be taken from the files_spec.
 If files_spec is '::' then no operations are done on files.  Similarly, if
 directories_spec is '::' then no operations are done on directories.
 
-Examples:
+EXAMPLES
 
   chogm www-data:www-data:644 -:-:755 /pub/www/*
 
@@ -61,10 +61,19 @@ Examples:
     This is the same as doing:
        $ find ~/tmp -type d | xargs chmod u+x
 
+REQUIREMENTS
+
+EXIT CODE
+
 Exit code is 0 if all operations were successful.  Exit code is 1 if some
 operations were not successfull (ie permission denied on a directory).
 Exit code is 2 if usage was incorrect.
 """
+
+# TODO
+#   add --exclude command line option to exclude certain patterns of files
+#   fix exit code - need to catch and propogate it up from the workers
+#   read files from stdin so you can pipe the output of find into this
 
 import sys
 import os
@@ -78,21 +87,22 @@ class Usage(Exception):
 		self.msg = msg
 
 class Ogm:
-	"hold an owner, group, and mode"
+	"""hold an owner, group, and mode"""
 	def __init__(self):
 		self.owner = None
 		self.group = None
 		self.mode = None
 
 class Worker:
-	'''a worker class that uses python multiprocessing module clone itself, launch an OS
+	"""a worker class that uses python multiprocessing module clone itself, launch an OS
 	   processes, and then catch new work from a multiprocessing.Pipe and send it to the
 	   OS process to get done.
 	
 	   The OS process is xargs, so that we don't have to execute a new OS process for
 	   every file we want to modify.  We just send it to standard in, and let xargs take
 	   care of how often it actually need to execute the chmod, chgrp or chmod
-	'''
+	
+	"""
 	def __init__(self, cmd, arg):
 		self.cmd = cmd
 		self.arg = arg
@@ -106,15 +116,15 @@ class Worker:
 		###self.pipe_reader.close()  # this is the parent so we close the reading end of the pipe
 
 	def name(self):
-		'''return the name of this worker: the command it runs and the first argument for that command
+		"""return the name of this worker: the command it runs and the first argument for that command
 		
 		   Examples: 'chown www-data' or 'chmod 755'
 		
-		'''
+		"""
 		return "%s %s" % (self.cmd, self.arg)
 
 	def add(self, file):
-		'''send a filename to the writing end of the pipe'''
+		"""send a filename to the writing end of the pipe"""
 		# this is called by the parent, and writes stuff into the pipe for the child to read out
 		self.pipe_writer.send(file)
 		
@@ -178,7 +188,7 @@ class Manager:
 			self.dchmod = Worker('chmod', dogm.mode)
 		
 	def do_file(self, file):
-		"pass file to our subprocesses to change its owner, group and mode"
+		"""pass file to our subprocesses to change its owner, group and mode"""
 		if self.fchown:
 			self.fchown.add(file)
 		if self.fchgrp:
@@ -187,7 +197,7 @@ class Manager:
 			self.fchmod.add(file)
 		
 	def do_dir(self, file):
-		"pass a directory to our subprocesses to change its owner group and mode"
+		"""pass a directory to our subprocesses to change its owner group and mode"""
 		if self.dchown:
 			self.dchown.add(file)
 		if self.dchgrp:
@@ -196,7 +206,7 @@ class Manager:
 			self.dchmod.add(file)
 
 	def finish(self):
-		"close all of our workers"
+		"""fire all of our workers"""
 		self.fire(self.fchown)
 		self.fire(self.dchown)
 		self.fire(self.fchgrp)
@@ -205,9 +215,9 @@ class Manager:
 		self.fire(self.dchmod)
 
 	def fire(self, worker):
-		"tell a worker there is no more work for them and send them home"
+		"""tell a worker there is no more work for them and send them home"""
 		if worker:
-			# send the poisen pill
+			# put the "no more work" paper in the inbox
 			worker.add(None)
 			# and send the worker home
 			worker.gohome()
