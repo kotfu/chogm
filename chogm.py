@@ -31,25 +31,26 @@ chogm [OPTIONS] files_spec directories_spec file [file file ...]
    directories_spec     owner:group:perms to set on directories
 
 files_spec tells what owner, group, and permissions should be given to any
-files. Each of the three elements are separated by a ':'. If a value is not
-given for a particular element, that that element is not changed on the
-encountered files.
+files. Each of the three elements are separated by a ':'. If a value is
+not given for a particular element, that that element is not changed on
+the encountered files.
 
 directories_spec works just like files_spec, but it is applied to
-directories. In addition, if you give a '-' as the owner or group, the same
-owner and group will be taken from the files_spec.
+directories. In addition, if you give a '-' as the owner or group, the
+same owner and group will be taken from the files_spec.
 
-If files_spec is '::' then no operations are done on files.  Similarly, if
+If files_spec is '::' then no operations are done on files. Similarly, if
 directories_spec is '::' then no operations are done on directories.
 
 EXAMPLES
 
   chogm www-data:www-data:644 -:-:755 /pub/www/*
 
-    Change all files in /pub/www to have an owner and group of www-data, and
-    permissions of -rw-r--r--. Also change all directories in /pub/www/ to
-    have an owner and group of www-data, but permissions of -rwxr-xr-x.  This
-    is equivilent to the following shell commands:
+    Change all files in /pub/www to have an owner and group of www-data,
+    and permissions of -rw-r--r--. Also change all directories in
+    /pub/www/ to have an owner and group of www-data, but permissions of
+    -rwxr-xr-x. This is equivilent to the following shell commands:
+
       $ chown www-data:www-group /pub/www/*
       $ find /pub/www -maxdepth 1 -type f | xargs chmod 644
       $ find /pub/www -maxdepth 1 -type d | tail -n +2 | xargs chmod 755 
@@ -57,17 +58,24 @@ EXAMPLES
 
   chogm -R :: ::u+x ~/tmp
 
-    Add the execute bit for the owner of ~/tmp and any directories under it.
-    This is the same as doing:
-       $ find ~/tmp -type d | xargs chmod u+x
+    Add the execute bit for the owner of ~/tmp and any directories under
+    it. This is the same as doing:
+
+		$ find ~/tmp -type d | xargs chmod u+x
 
 REQUIREMENTS
 
+This script uses the operating system commands xargs, chmod, chgrp, and
+chmod to do it's work. It also uses the python multiprocessing module from
+the standard library which was added in python 2.6, so it won't work with
+python versions earlier than that. It won't work in python 3.x.
+
 EXIT CODE
 
-Exit code is 0 if all operations were successful.  Exit code is 1 if some
+Exit code is 0 if all operations were successful. Exit code is 1 if some
 operations were not successfull (ie permission denied on a directory).
 Exit code is 2 if usage was incorrect.
+
 """
 
 # TODO
