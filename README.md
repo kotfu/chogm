@@ -15,14 +15,15 @@ Usage
        file                 one or more files to operate on.  Use '-' to  
                             process stdin as a list of files  
 
-files_spec tells what owner, group, and permissions should be given to
-any files. Each of the three elements are separated by a ':'. If a value
-is not given for a particular element, that that element is not changed
-on the encountered files.
+    files_spec tells what owner, group, and permissions should be given
+    to any files. Each of the three elements are separated by a ':'. If
+    a value is not given for a particular element, that that element is
+    not changed on the encountered files.
 
-directories_spec works just like files_spec, but it is applied to
-directories. In addition, if you give a '-' as the owner or group, the
-same owner and group will be taken from the files_spec.
+    directories_spec works just like files_spec, but it is applied to
+    directories. In addition, if you give a '-' as the owner or group,
+    the same owner and group will be taken from the files_spec.
+
 
 Examples
 --------
