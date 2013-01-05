@@ -22,23 +22,46 @@
 # THE SOFTWARE.
 #
 
-"""Module Docstring
+"""Change the owner, group, and mode with a single command
 
- quickly change the owner, group, and mode of a bunch of files
+chogm [ -R | --recursive ] files_spec directories_spec file [file file ...]
+   -R, --recursive      recurse through the directory tree of each file
+   files_spec           owner:group:perms
+   directories_spec     owner:group:perms
 
- chogm [ -R | --recursive ] files_spec directories_spec file [file file ...]
-   -R, --recursive		recursivly change 
-   files_spec					owner:group:perms
-   directories_spec		owner:group:perms
-   If files_spec is '::' then no operations will be done on files
-   If directories_spec is '::' then no operations will be done on directories
+files_spec tells what owner, group, and permissions should be given to any
+files. Each of the three elements are separated by a ':'. If a value is not
+given for a particular element, that that element is not changed on the
+encounted files.
 
-long usage message
+directories_spec works just like files_spec, but it is applied to
+directories. In addition, if you give a '-' as the owner or group, the same
+owner and group will be taken from the files_spec.
 
-shamelessly borrowed from the BDFL
-http://www.artima.com/weblogs/viewpost.jsp?thread=4829
+If files_spec is '::' then no operations are done on files.  Similarly, if
+directories_spec is '::' then no operations are done on directories.
+
+Examples:
+
+  chogm www-data:www-data:644 -:-:755 /pub/www/*
+
+    Change all files in /pub/www to have an owner and group of www-data, and
+    permissions of -rw-r--r--. Also change all directories in /pub/www/ to
+    have an owner and group of www-data, but permissions of -rwxr-xr-x.  This
+    is equivilent to the following shell commands:
+      $ chown www-data:www-group /pub/www/*
+      $ find /pub/www -maxdepth 1 -type f | xargs chmod 644
+      $ find /pub/www -maxdepth 1 -type d | tail -n +2 | xargs chmod 755 
+
+
+  chogm -R :: ::u+x ~/tmp
+
+    Add the execute bit for the owner of ~/tmp and any directories under it.
+    This is the same as doing:
+       $ find ~/tmp -type d | xargs chmod u+x
 
 """
+
 import sys
 import os
 import getopt
