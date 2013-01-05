@@ -61,6 +61,9 @@ Examples:
     This is the same as doing:
        $ find ~/tmp -type d | xargs chmod u+x
 
+Exit code is 0 if all operations were successful.  Exit code is 1 if some
+operations were not successfull (ie permission denied on a directory).
+Exit code is 2 if usage was incorrect.
 """
 
 import sys
@@ -90,11 +93,9 @@ class Worker:
 	   every file we want to modify.  We just send it to standard in, and let xargs take
 	   care of how often it actually need to execute the chmod, chgrp or chmod
 	'''
-	def __init__(self, cmd, arg, verbose=False, debug=False):
+	def __init__(self, cmd, arg):
 		self.cmd = cmd
 		self.arg = arg
-		self.verbose = verbose
-		self.debug = debug
 		# set up a pipe so we can communicate with our multiprocessing.Process.
 		# The parent side of the pipe is the writer, we write filenames into it.
 		# The child side of the pipe is the reader.  The child reads files out of
@@ -120,7 +121,7 @@ class Worker:
 	def runner(self, cmd, arg):
 		###self.pipe_writer.close()  # this is the child so we close the writing end of the pipe
 		xargs = subprocess.Popen(["xargs","echo", cmd, arg], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-		if self.debug:
+		if debug:
 			print >>sys.stderr, "--worker '%s' started xargs subprocess pid=%i" % (self.name(), xargs.pid)
 		while True:
 			try:
@@ -128,12 +129,12 @@ class Worker:
 				file = self.pipe_reader.recv()
 				# if we get message that there is None work, then we are done
 				if file is None:
-					if self.debug:
+					if debug:
 						print >>sys.stderr, "--worker '%s' received poisen pill" % self.name()
 					break
 				# send the file to the stdin of the xargs process
 				print >>xargs.stdin, file
-				if self.debug:
+				if debug:
 					print >>sys.stderr, "--worker '%s' received %s" % (self.name(), file)
 			except EOFError:
 				break
@@ -141,7 +142,7 @@ class Worker:
 		# we have broken out of the loop, so that means we have no more work to do
 		# gracefully close down the xargs process and catch the output
 		(stdoutdata,stderrdata) = xargs.communicate()
-		if self.debug:
+		if debug:
 			print >>sys.stderr, "--worker '%s' xargs pid=%i returncode=%i" % (self.name(), xargs.pid, xargs.returncode)
 			print >>sys.stderr, "--worker '%s' xargs output=%s" % (self.name(), stdoutdata)
 		#if self.verbose:
@@ -149,12 +150,12 @@ class Worker:
 		#	print >>sys.stderr, stderrdata
 
 	def gohome(self):
-		if self.debug:
+		if debug:
 			print >>sys.stderr, "--worker '%s' joining mp.Process" % self.name()
 		self.p.join()
 
 class Manager:
-	def __init__(self, fogm, dogm, verbose=False, debug=False):
+	def __init__(self, fogm, dogm):
 		self.fogm = fogm
 		self.dogm = dogm
 		self.fchown = None
@@ -164,17 +165,17 @@ class Manager:
 		self.fchmod = None
 		self.dchmod = None
 		if fogm.owner:
-			self.fchown = Worker('chown', fogm.owner, verbose, debug)
+			self.fchown = Worker('chown', fogm.owner)
 		if dogm.owner:
-			self.dchown = Worker('chown', dogm.owner, verbose, debug)
+			self.dchown = Worker('chown', dogm.owner)
 		if fogm.group:
-			self.fchgrp = Worker('chgrp', fogm.group, verbose, debug)
+			self.fchgrp = Worker('chgrp', fogm.group)
 		if dogm.group:
-			self.dchgrp = Worker('chgrp', dogm.group, verbose, debug)
+			self.dchgrp = Worker('chgrp', dogm.group)
 		if fogm.mode:
-			self.fchmod = Worker('chmod', fogm.mode, verbose, debug)
+			self.fchmod = Worker('chmod', fogm.mode)
 		if dogm.mode:
-			self.fchmod = Worker('chmod', dogm.mode, verbose, debug)
+			self.dchmod = Worker('chmod', dogm.mode)
 		
 	def do_file(self, file):
 		"pass file to our subprocesses to change its owner, group and mode"
@@ -220,9 +221,17 @@ def main(argv=None):
 	longopts = [ "help", "recursive", "verbose", "debug" ]
 	
 	# parse command line
-	recursive = False
+	# yes the global variables are a bit messy, but it's cleaner than passing them into
+	# all of our classes
+	global debug
+	global verbose
+	global ranAs
 	debug = False
 	verbose = False
+	ranAs = os.path.basename(argv[0])
+
+	recursive = False
+
 	try:
 		try:
 			opts, args = getopt.getopt(argv[1:], shortopts, longopts)
@@ -244,7 +253,7 @@ def main(argv=None):
 		# process arguments
 		spec = args.pop(0).split(':')
 		if len(spec) <> 3:
-			raise Usage('Invalid file specification') 
+			raise Usage('%s: Invalid file specification' % ranAs)
 		fileOgm = Ogm()
 		fileOgm.owner = spec[0]
 		fileOgm.group = spec[1]
@@ -252,7 +261,7 @@ def main(argv=None):
 
 		spec = args.pop(0).split(':')
 		if len(spec) <> 3:
-			raise Usage('Invalid directory specification') 
+			raise Usage('%s: Invalid directory specification' % ranAs) 
 		dirOgm = Ogm()
 		dirOgm.owner = spec[0]
 		dirOgm.group = spec[1]
@@ -266,10 +275,10 @@ def main(argv=None):
 			dirOgm.mode = fileOgm.mode
 
 		# start up the child processes
-		m = Manager(fileOgm, dirOgm, verbose, debug)
+		m = Manager(fileOgm, dirOgm)
 		
 		for file in args:
-			walktree(m, file, recursive, verbose)
+			walktree(m, file, recursive)
 
 		m.finish()
 		return 0
@@ -279,7 +288,7 @@ def main(argv=None):
 		print >>sys.stderr, "for help use --help"
 		return 2
 
-def walktree(p, top, recursive=False, verbose=False):
+def walktree(p, top, recursive=False):
 	try:
 		if os.path.isfile(top):
 			p.do_file(top)
@@ -288,10 +297,16 @@ def walktree(p, top, recursive=False, verbose=False):
 				print >>sys.stderr, "Processing directory %s" % top
 			p.do_dir(top)
 			if recursive:
-				for f in os.listdir(top):
-					walktree(p, os.path.join(top,f), recursive)
+				try:
+					for f in os.listdir(top):
+						walktree(p, os.path.join(top,f), recursive)
+				except OSError, e:
+					if e.errno == 13:
+						print >>sys.stderr,"%s: %s: Permission denied." % (ranAs, e.filename)
+					else:
+						print >>sys.stderr, e
 		else:
-			print >>sys.stderr, "cannot access '%s': No such file or directory" % top
+			print >>sys.stderr, "%s: cannot access '%s': No such file or directory" % (ranAs, top)
 	except OSError, ose:
 		print >>sys.stderr, ose
 
