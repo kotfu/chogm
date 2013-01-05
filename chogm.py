@@ -287,29 +287,31 @@ def main(argv=None):
 		# start up the child processes
 		m = Manager(fileOgm, dirOgm)
 		
+		# walk through our files, making the changes
 		for file in args:
 			walktree(m, file, recursive)
 
+		# and finish up
 		m.finish()
 		return 0
 
 	except Usage, err:
 		print >>sys.stderr, err.msg
-		print >>sys.stderr, "for help use --help"
+		print >>sys.stderr, "for more information use --help"
 		return 2
 
-def walktree(p, top, recursive=False):
+def walktree(m, top, recursive=False):
 	try:
 		if os.path.isfile(top):
-			p.do_file(top)
+			m.do_file(top)
 		elif os.path.isdir(top):
 			if verbose:
 				print >>sys.stderr, "Processing directory %s" % top
-			p.do_dir(top)
+			m.do_dir(top)
 			if recursive:
 				try:
 					for f in os.listdir(top):
-						walktree(p, os.path.join(top,f), recursive)
+						walktree(m, os.path.join(top,f), recursive)
 				except OSError, e:
 					if e.errno == 13:
 						print >>sys.stderr,"%s: %s: Permission denied." % (ranAs, e.filename)
