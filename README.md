@@ -6,14 +6,14 @@ Change the owner, group and mode of some files with a single command
 Usage
 -----
 
-chogm [OPTIONS] files_spec directories_spec file [file file ...]
-   -R, --recursive      recurse through the directory tree of each file
-   -v, --verbose        show progress
-   -h, --help           display this usage message
-   files_spec           owner:group:perms to set on files
-   directories_spec     owner:group:perms to set on directories
-   file                 one or more files to operate on.  Use '-' to
-                        process stdin as a list of files
+chogm [OPTIONS] files_spec directories_spec file [file file ...]  
+   -R, --recursive      recurse through the directory tree of each file  
+   -v, --verbose        show progress  
+   -h, --help           display this usage message  
+   files_spec           owner:group:perms to set on files  
+   directories_spec     owner:group:perms to set on directories  
+   file                 one or more files to operate on.  Use '-' to  
+                        process stdin as a list of files  
 
 files_spec tells what owner, group, and permissions should be given to any
 files. Each of the three elements are separated by a ':'. If a value is
