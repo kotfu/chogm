@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
 # Copyright (c) 2007, Jared Crapo
@@ -159,7 +159,7 @@ class Worker:
 		"""
 		xargs = subprocess.Popen(["xargs",cmd, arg], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 		if debug:
-			print >>sys.stderr, "--worker '%s' started xargs subprocess pid=%i" % (self.name(), xargs.pid)
+			print("--worker '%s' started xargs subprocess pid=%i" % (self.name(), xargs.pid), file=sys.stderr)
 		while True:
 			try:
 				# receive work from our parent pipe
@@ -167,12 +167,12 @@ class Worker:
 				# if we get message that there is None work, then we are done
 				if filename == None:
 					if debug:
-						print >>sys.stderr, "--worker '%s' has no more work to do" % self.name()
+						print("--worker '%s' has no more work to do" % self.name(), file=sys.stderr)
 					break
 				# send the file to the stdin of the xargs process
-				print >>xargs.stdin, filename
+				print(filename,file=xargs.stdin)
 				if debug:
-					print >>sys.stderr, "--worker '%s' received %s" % (self.name(), filename)
+					print("--worker '%s' received %s" % (self.name(), filename), file=sys.stderr)
 			except EOFError:
 				break
 
@@ -181,13 +181,13 @@ class Worker:
 		# write the exit code and the errors into the pipe to our parent
 		(stdoutdata,stderrdata) = xargs.communicate()
 		if debug:
-			print >>sys.stderr, "--worker '%s' xargs pid=%i returncode=%i" % (self.name(), xargs.pid, xargs.returncode)
-			print >>sys.stderr, "--worker '%s' xargs stderr=%s" % (self.name(), stderrdata)
+			print("--worker '%s' xargs pid=%i returncode=%i" % (self.name(), xargs.pid, xargs.returncode), file=sys.stderr)
+			print("--worker '%s' xargs stderr=%s" % (self.name(), stderrdata), file=sys.stderr)
 		self.pipe_parent.send( (xargs.returncode, stderrdata.rstrip('\r\n')) )
 
 	def gohome(self):
 		if debug:
-			print >>sys.stderr, "--worker '%s' joining mp.Process" % self.name()
+			print("--worker '%s' joining mp.Process" % self.name(), file=sys.stderr)
 		(rtncode,errmsgs) = self.pipe_child.recv()
 		self.p.join()
 		return (rtncode,errmsgs)
@@ -241,12 +241,12 @@ class Manager:
 	def report_information(self,message):
 		"""report information to stderr if verbose is set"""
 		if self.verbose:
-			print >>sys.stderr, message
+			print(message, file=sys.stderr)
 
 	def report_error(self, message):
 		"""report an error by printing it to stderr"""
 		self.haveError = True
-		print >>sys.stderr, message
+		print(message, file=sys.stderr)
 
 	def finish(self):
 		"""fire all of our workers and return a proper shell return code"""
@@ -292,13 +292,13 @@ def main(argv=None):
 	try:
 		try:
 			opts, args = getopt.getopt(argv[1:], shortopts, longopts)
-		except getopt.error, msg:
+		except getopt.error as msg:
 			raise Usage(msg)
 	
 		# process options
 		for opt, parm in opts:
 			if opt in ("-h", "--help"):
-				print >>sys.stderr, __doc__
+				print(__doc__, file=sys.stderr)
 				return 0
 			if opt in ("-R", "--recursive"):
 				recursive = True
@@ -352,9 +352,9 @@ def main(argv=None):
 		# and finish up
 		return m.finish()
 
-	except Usage, err:
-		print >>sys.stderr, "%s: %s" % (ranAs, err.msg)
-		print >>sys.stderr, "for more information use --help"
+	except Usage as err:
+		print("%s: %s" % (ranAs, err.msg), file=sys.stderr)
+		print("for more information use --help", file=sys.stderr)
 		return 2
 
 def examine(m, thisfile, recursive=False):
@@ -369,7 +369,7 @@ def examine(m, thisfile, recursive=False):
 				try:
 					for eachfile in os.listdir(thisfile):
 						examine(m, os.path.join(thisfile, eachfile), recursive)
-				except OSError, e:
+				except OSError as e:
 					# do nicer formatting for common errors
 					if e.errno == 13:
 						m.report_error("%s: %s: Permission denied" % (ranAs, e.filename))
@@ -377,7 +377,7 @@ def examine(m, thisfile, recursive=False):
 						m.report_error("%s: %s" % (ranAs, e))
 		else:
 			m.report_error("%s: cannot access '%s': No such file or directory" % (ranAs, thisfile))
-	except OSError, ose:
+	except OSError as ose:
 		m.report_error("%s: %s" % (ranAs, e))		
 
 
