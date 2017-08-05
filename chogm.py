@@ -285,7 +285,7 @@ def main(argv=None):
 	verbose = args.verbose
 	recursive = args.recursive
 	global debug
-	debug = True
+	debug = False
 
 	spec = args.file_spec[0].split(':')
 	if len(spec) != 3:
