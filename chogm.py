@@ -130,7 +130,7 @@ class Worker:
 		# messages from it.  From the child process, we read filenames from the parent pipe
 		# and write error messages into it.
 		self.pipe_parent, self.pipe_child = mp.Pipe(duplex = True)
-		self.p = mp.Process(target=self.runner,args=(cmd,arg,))
+		self.p = mp.Process(target=self.runner, args=(cmd,arg,))
 		self.p.start()
 		###self.pipe_parent.close()  # this is the parent so we close the reading end of the pipe
 
@@ -156,7 +156,7 @@ class Worker:
 		We also fire up an xargs subprocess to actually do the work, and feed stuff
 		from our parent pipe to stdin of the subprocess.
 		"""
-		xargs = subprocess.Popen(["xargs",cmd, arg], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		xargs = subprocess.Popen(["xargs", cmd, arg], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
 		if debug:
 			print("--worker '%s' started xargs subprocess pid=%i" % (self.name(), xargs.pid), file=sys.stderr)
 		while True:
@@ -169,7 +169,7 @@ class Worker:
 						print("--worker '%s' has no more work to do" % self.name(), file=sys.stderr)
 					break
 				# send the file to the stdin of the xargs process
-				print(filename,file=xargs.stdin)
+				print(filename, file=xargs.stdin)
 				if debug:
 					print("--worker '%s' received %s" % (self.name(), filename), file=sys.stderr)
 			except EOFError:
@@ -279,7 +279,6 @@ def main(argv=None):
 	parser.add_argument('directory_spec', nargs=1, help='owner:group:perms to set on directories')
 	parser.add_argument('file', nargs='+', help='one or more files to operate on.  Use \'-\' to process stdin as a list of files')
 	args = parser.parse_args()
-	print(args)
 
 	verbose = args.verbose
 	recursive = args.recursive
@@ -320,6 +319,8 @@ def main(argv=None):
 
 def examine(m, thisfile, parser, recursive=False):
 	"""Recursively process a single file or directory"""
+	if debug:
+		print("--examining '%s'" % thisfile, file=sys.stderr)
 	try:
 		if os.path.isfile(thisfile):
 			m.do_file(thisfile)
