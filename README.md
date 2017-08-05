@@ -10,19 +10,19 @@ Usage
        -R, --recursive      recurse through the directory tree of each file  
        -v, --verbose        show progress  
        -h, --help           display this usage message  
-       files_spec           owner:group:perms to set on files  
-       directories_spec     owner:group:perms to set on directories  
+       file_spec           owner:group:perms to set on files  
+       directory_spec     owner:group:perms to set on directories  
        file                 one or more files to operate on.  Use '-' to  
                             process stdin as a list of files  
 
-    files_spec tells what owner, group, and permissions should be given
-    to any files. Each of the three elements are separated by a ':'. If
-    a value is not given for a particular element, that that element is
-    not changed on the encountered files.
+    file_spec tells what owner, group, and permissions should be given to any
+    files. Each of the three elements are separated by a ':'. If a value is
+    not given for a particular element, that that element is not changed on
+    the encountered files.
 
-    directories_spec works just like files_spec, but it is applied to
-    directories. In addition, if you give a '-' as the owner or group,
-    the same owner and group will be taken from the files_spec.
+    directory_spec works just like files_spec, but it is applied to
+    directories. If any element of directory_spec is a comma, the value of that
+    element will be used from file_spec
 
 
 Examples
@@ -70,10 +70,9 @@ Requirements
 ------------
 
 This script uses the operating system commands xargs, chmod, chgrp, and
-chmod to do it's work. It also uses the python multiprocessing module
-from the standard library which was added in python 2.6, so it won't
-work with python versions earlier than that. It won't work in python
-3.x.
+chmod to do it's work. It also uses the python multiprocessing module from
+the standard library which was added in python 2.6, so it won't work with
+python versions earlier than that. It works in python 2.7 and 3+.
 
 Exit Status
 -----------

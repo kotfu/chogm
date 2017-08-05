@@ -28,22 +28,23 @@ chogm [OPTIONS] files_spec directories_spec file [file file ...]
    -R, --recursive      recurse through the directory tree of each file
    -v, --verbose        show progress
    -h, --help           display this usage message
-   files_spec           owner:group:perms to set on files
-   directories_spec     owner:group:perms to set on directories
+   file_spec            owner:group:perms to set on files
+   directory_spec       owner:group:perms to set on directories
    file                 one or more files to operate on.  Use '-' to
-                        process stdin as a list of files
+                        process stdin as a list of files.
 
-files_spec tells what owner, group, and permissions should be given to any
+file_spec tells what owner, group, and permissions should be given to any
 files. Each of the three elements are separated by a ':'. If a value is
 not given for a particular element, that that element is not changed on
 the encountered files.
 
-directories_spec works just like files_spec, but it is applied to
-directories.
+directory_spec works just like files_spec, but it is applied to
+directories. If any element of directory_spec is a comma, the value of that
+element will be used from file_spec
 
 EXAMPLES
 
-  chogm www-data:www-data:644 -:-:755 /pub/www/*
+  chogm www-data:www-data:644 ,:,:755 /pub/www/*
 
     Change all files in /pub/www to have an owner and group of www-data,
     and permissions of -rw-r--r--. Also change all directories in
@@ -55,7 +56,7 @@ EXAMPLES
       $ find /pub/www -maxdepth 1 -type d | tail -n +2 | xargs chmod 755 
 
 
-  chogm -R :accounting:g+rw,o= :-:g=rwx,o= /mnt/acct
+  chogm -R :accounting:g+rw,o= :,:g=rwx,o= /mnt/acct
 
     Change the group of all files in /mnt/acct to be accounting, and
     make sure people in that group can read, write, and create files
@@ -82,7 +83,7 @@ REQUIREMENTS
 This script uses the operating system commands xargs, chmod, chgrp, and
 chmod to do it's work. It also uses the python multiprocessing module from
 the standard library which was added in python 2.6, so it won't work with
-python versions earlier than that. It won't work in python 3.x.
+python versions earlier than that. It works in python 2.7 and 3+.
 
 EXIT STATUS
 
@@ -302,6 +303,13 @@ def main(argv=None):
 	dirOgm.owner = spec[0]
 	dirOgm.group = spec[1]
 	dirOgm.mode = spec[2]
+	# check for ',' which means to clone the argument from the file_spec
+	if dirOgm.owner == ',':
+		dirOgm.owner = fileOgm.owner
+	if dirOgm.group == ',':
+		dirOgm.group = fileOgm.group
+	if dirOgm.mode == ',':
+		dirOgm.mode = fileOgm.mode
 
 	# start up the child processes
 	m = Manager(fileOgm, dirOgm, verbose)
