@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2007, Jared Crapo
+# Copyright (c) 2007-2017, Jared Crapo
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@
 # THE SOFTWARE.
 #
 
-"""Change the owner, group, and mode with a single command
+"""Change the owner, group, and mode of some files with a single command
 
 chogm [OPTIONS] files_spec directories_spec file [file file ...]
    -R, --recursive      recurse through the directory tree of each file
@@ -39,8 +39,7 @@ not given for a particular element, that that element is not changed on
 the encountered files.
 
 directories_spec works just like files_spec, but it is applied to
-directories. In addition, if you give a '-' as the owner or group, the
-same owner and group will be taken from the files_spec.
+directories.
 
 EXAMPLES
 
@@ -95,7 +94,7 @@ EXIT STATUS
 
 import sys
 import os
-import getopt
+import argparse
 import stat
 import multiprocessing as mp
 import subprocess
@@ -272,92 +271,54 @@ class Manager:
 				self.report_error(stderrdata)			
 
 def main(argv=None):
-	if argv is None:
-		argv = sys.argv
 
-	shortopts = "hRv"
-	longopts = [ "help", "recursive", "verbose", "debug" ]
-	
-	# parse command line
-	# yes the global variables are a bit messy, but it's cleaner than passing them into
-	# all of our classes
+	parser = argparse.ArgumentParser(description='Change the owner, group, and mode of some files with a single command')
+	parser.add_argument('-R', '--recursive', action='store_true', help='recurse through the directory tree of each filespec')
+	parser.add_argument('-v', '--verbose', action='store_true', help='show progress')
+	parser.add_argument('file_spec', nargs=1, help='owner:group:perms to set on files')
+	parser.add_argument('directory_spec', nargs=1, help='owner:group:perms to set on directories')
+	parser.add_argument('file', nargs='+', help='one or more files to operate on.  Use \'-\' to process stdin as a list of files')
+	args = parser.parse_args()
+	print(args)
+
+	verbose = args.verbose
+	recursive = args.recursive
 	global debug
-	global ranAs
-	debug = False
-	verbose = False
-	ranAs = os.path.basename(argv[0])
+	debug = True
 
-	recursive = False
+	spec = args.file_spec[0].split(':')
+	if len(spec) != 3:
+		parser.error('Invalid file_spec') 		
+	fileOgm = Ogm()
+	fileOgm.owner = spec[0]
+	fileOgm.group = spec[1]
+	fileOgm.mode = spec[2]
 
-	try:
-		try:
-			opts, args = getopt.getopt(argv[1:], shortopts, longopts)
-		except getopt.error as msg:
-			raise Usage(msg)
+	spec = args.directory_spec[0].split(':')
+	if len(spec) != 3:
+		parser.error('Invalid directory_spec') 
+	dirOgm = Ogm()
+	dirOgm.owner = spec[0]
+	dirOgm.group = spec[1]
+	dirOgm.mode = spec[2]
+
+	# start up the child processes
+	m = Manager(fileOgm, dirOgm, verbose)
 	
-		# process options
-		for opt, parm in opts:
-			if opt in ("-h", "--help"):
-				print(__doc__, file=sys.stderr)
-				return 0
-			if opt in ("-R", "--recursive"):
-				recursive = True
-			if opt in ("-v", "--verbose"):
-				verbose = True
-			if opt in ("--debug"):
-				debug = True
-	
-		# process arguments
-		spec = args.pop(0).split(':')
-		if len(spec) != 3:
-			raise Usage('Invalid file specification')
-		fileOgm = Ogm()
-		fileOgm.owner = spec[0]
-		fileOgm.group = spec[1]
-		fileOgm.mode = spec[2]
-
-		spec = args.pop(0).split(':')
-		if len(spec) != 3:
-			raise Usage('Invalid directory specification') 
-		dirOgm = Ogm()
-		dirOgm.owner = spec[0]
-		dirOgm.group = spec[1]
-		dirOgm.mode = spec[2]
-		# check for '-' which means to clone the argument from the file_spec
-		if dirOgm.owner == '-':
-			dirOgm.owner = fileOgm.owner
-		if dirOgm.group == '-':
-			dirOgm.group = fileOgm.group
-		if dirOgm.mode == '-':
-			dirOgm.mode = fileOgm.mode
-
-		if args == []:
-			raise Usage('No files given')
-
-
-		# start up the child processes
-		m = Manager(fileOgm, dirOgm, verbose)
-		
-		# examine each of the files
-		if args == ['-']:
-			# get files from standard in
+	# examine each of the files
+	for filename in args.file:
+		if filename == '-':
 			while True:
 				onefile = sys.stdin.readline()
-				if onefile == "": break
-				examine(m, onefile.rstrip("\r\n"), recursive)
+				if onefile == '': break
+				examine(m, onefile.rstrip('\r\n'), parser, recursive)
 		else:
-			for filename in args:
-				examine(m, filename, recursive)
+			examine(m, filename, parser, recursive)
 
-		# and finish up
-		return m.finish()
+	# and finish up
+	return m.finish()
 
-	except Usage as err:
-		print("%s: %s" % (ranAs, err.msg), file=sys.stderr)
-		print("for more information use --help", file=sys.stderr)
-		return 2
-
-def examine(m, thisfile, recursive=False):
+def examine(m, thisfile, parser, recursive=False):
 	"""Recursively process a single file or directory"""
 	try:
 		if os.path.isfile(thisfile):
@@ -368,17 +329,17 @@ def examine(m, thisfile, recursive=False):
 				m.report_information("Processing directory %s...." % thisfile)
 				try:
 					for eachfile in os.listdir(thisfile):
-						examine(m, os.path.join(thisfile, eachfile), recursive)
+						examine(m, os.path.join(thisfile, eachfile), parser, recursive)
 				except OSError as e:
 					# do nicer formatting for common errors
 					if e.errno == 13:
-						m.report_error("%s: %s: Permission denied" % (ranAs, e.filename))
+						m.report_error("%s: %s: Permission denied" % (parser.prog, e.filename))
 					else:
-						m.report_error("%s: %s" % (ranAs, e))
+						m.report_error("%s: %s" % (parser.prog, e))
 		else:
-			m.report_error("%s: cannot access '%s': No such file or directory" % (ranAs, thisfile))
+			m.report_error("%s: cannot access '%s': No such file or directory" % (parser.prog, thisfile))
 	except OSError as ose:
-		m.report_error("%s: %s" % (ranAs, e))		
+		m.report_error("%s: %s" % (parser.prog, e))		
 
 
 if __name__ == "__main__":
